@@ -12,6 +12,13 @@ const profileSelect = document.getElementById('profileSelect');
 const activeProfileLabel = document.getElementById('activeProfileLabel');
 const remoteDirInput = document.getElementById('remoteDirInput');
 const remoteDirDefaultLabel = document.getElementById('remoteDirDefaultLabel');
+const remoteRootSelect = document.getElementById('remoteRootSelect');
+const btnFetchRemoteDirs = document.getElementById('btnFetchRemoteDirs');
+const remoteDirList = document.getElementById('remoteDirList');
+const btnUseRemoteDir = document.getElementById('btnUseRemoteDir');
+const remoteDirHint = document.getElementById('remoteDirHint');
+const newSubfolderInput = document.getElementById('newSubfolderInput');
+const btnComposeRemote = document.getElementById('btnComposeRemote');
 const uploadProgressWrap = document.getElementById('uploadProgressWrap');
 const uploadFileNameEl = document.getElementById('uploadFileName');
 const uploadProgressBar = document.getElementById('uploadProgressBar');
@@ -21,6 +28,8 @@ const uploadPercentEl = document.getElementById('uploadPercent');
 const uploadSpeedEl = document.getElementById('uploadSpeed');
 
 const uploadEtaEl = document.getElementById('uploadEta');
+const btnCancelUpload = document.getElementById('btnCancelUpload');
+const chkDeleteOnCancel = document.getElementById('chkDeleteOnCancel');
 
 let activeProfileName = null;
 let activeProfile = null;
@@ -28,6 +37,10 @@ let configCache = null;
 
 // Remote dir override per profile (in-memory)
 const remoteDirByProfile = {};
+const remoteRootsByProfile = {};
+let currentUploadProc = null;
+let currentUploadRemoteTarget = null;
+let currentUploadProfile = null;
 
 function log(line) {
   if (!out) {
@@ -138,6 +151,11 @@ function initProfiles(cfg) {
   // Current value: in-memory override for this profile, otherwise the defaults.
   remoteDirByProfile[defaultName] = remoteDirByProfile[defaultName] || profileDefault || globalDefault || '';
   remoteDirInput.value = remoteDirByProfile[defaultName];
+
+  // Remote roots per profile (if defined)
+  const roots = cfg.profiles[defaultName].remoteRoots || cfg.remoteRoots || ['/srv/storage-media', '/srv/storage-2md'];
+  remoteRootsByProfile[defaultName] = roots;
+  syncRemoteRootsSelect(roots);
 }
 
 function testSSH(profile) {
@@ -189,6 +207,9 @@ function uploadFile(profile, localFile, remoteDir, onProgress) {
     ];
 
     const proc = spawn('rsync', args);
+    currentUploadProc = proc;
+    currentUploadRemoteTarget = `${remoteDir.replace(/\/+$/, '')}/${path.basename(localFile)}`;
+    currentUploadProfile = profile;
 
     let stdoutBuf = '';
     let stderr = '';
@@ -227,6 +248,9 @@ function uploadFile(profile, localFile, remoteDir, onProgress) {
     });
 
     proc.on('close', (code) => {
+      currentUploadProc = null;
+      currentUploadRemoteTarget = null;
+      currentUploadProfile = null;
       if (code === 0) {
         resolve('UPLOAD_OK');
       } else {
@@ -279,6 +303,9 @@ function uploadFolder(profile, localDir, remoteDir, onProgress) {
       ];
 
       const proc = spawn('rsync', args);
+      currentUploadProc = proc;
+      currentUploadRemoteTarget = remoteTarget;
+      currentUploadProfile = profile;
 
       let stdoutBuf = '';
       let stderr = '';
@@ -315,9 +342,59 @@ function uploadFolder(profile, localDir, remoteDir, onProgress) {
       });
 
       proc.on('close', (code2) => {
+        currentUploadProc = null;
+        currentUploadRemoteTarget = null;
+        currentUploadProfile = null;
         if (code2 === 0) resolve('UPLOAD_OK');
         else reject(new Error(`rsync exit ${code2}\n${stderr.trim()}`));
       });
+    });
+  });
+}
+
+function listRemoteDirs(profile, rootPath) {
+  return new Promise((resolve, reject) => {
+    const allowed = profile.remoteRoots || configCache?.remoteRoots || ['/srv/storage-media', '/srv/storage-2md'];
+    if (!allowed.includes(rootPath)) {
+      reject(new Error('Root path not permès'));
+      return;
+    }
+    const host = profile.host;
+    const port = String(profile.port ?? 22);
+    const user = profile.user;
+    const key = expandHome(profile.identityFile);
+    const findCmd = `find ${rootPath} -maxdepth 2 -type d -not -path '*/.*' -print`;
+    const args = ['-i', key, '-p', port, `${user}@${host}`, findCmd];
+    const proc = spawn('ssh', args);
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (d) => (stdout += d.toString()));
+    proc.stderr.on('data', (d) => (stderr += d.toString()));
+    proc.on('close', (code) => {
+      if (code === 0) {
+        const lines = stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+        resolve(lines);
+      } else {
+        reject(new Error(`ssh find exit ${code}\n${stderr.trim()}`));
+      }
+    });
+  });
+}
+
+function deleteRemotePath(profile, remotePath) {
+  return new Promise((resolve, reject) => {
+    const host = profile.host;
+    const port = String(profile.port ?? 22);
+    const user = profile.user;
+    const key = expandHome(profile.identityFile);
+    const cmd = `rm -rf -- \"${remotePath}\"`;
+    const args = ['-i', key, '-p', port, `${user}@${host}`, cmd];
+    const proc = spawn('ssh', args);
+    let stderr = '';
+    proc.stderr.on('data', (d) => (stderr += d.toString()));
+    proc.on('close', (code) => {
+      if (code === 0) resolve('DELETE_OK');
+      else reject(new Error(`ssh rm exit ${code}\n${stderr.trim()}`));
     });
   });
 }
@@ -470,7 +547,100 @@ profileSelect.addEventListener('change', () => {
 
   remoteDirByProfile[name] = remoteDirByProfile[name] || profileDefault || globalDefault || '';
   remoteDirInput.value = remoteDirByProfile[name];
+
+  const roots = configCache.profiles[name].remoteRoots || configCache.remoteRoots || ['/srv/storage-media', '/srv/storage-2md'];
+  remoteRootsByProfile[name] = roots;
+  syncRemoteRootsSelect(roots);
 });
+
+function syncRemoteRootsSelect(roots) {
+  if (!remoteRootSelect) return;
+  remoteRootSelect.innerHTML = '';
+  roots.forEach((r) => {
+    const opt = document.createElement('option');
+    opt.value = r;
+    opt.textContent = r;
+    remoteRootSelect.appendChild(opt);
+  });
+}
+
+if (btnFetchRemoteDirs && remoteDirList) {
+  btnFetchRemoteDirs.addEventListener('click', async () => {
+    try {
+      const root = remoteRootSelect.value;
+      const { profile } = getActiveProfile();
+      remoteDirList.innerHTML = '<option value=\"\">(carregant...)</option>';
+      const dirs = await listRemoteDirs(profile, root);
+      remoteDirList.innerHTML = '';
+      dirs.forEach((p) => {
+        const opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = p;
+        remoteDirList.appendChild(opt);
+      });
+      if (!dirs.length) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '(sense resultats)';
+        remoteDirList.appendChild(opt);
+      }
+      remoteDirHint.textContent = `Llistat ${dirs.length} directoris sota ${root}`;
+    } catch (err) {
+      remoteDirHint.textContent = `ERROR: ${String(err.message || err)}`;
+    }
+  });
+}
+
+if (btnUseRemoteDir && remoteDirList) {
+  btnUseRemoteDir.addEventListener('click', () => {
+    const val = remoteDirList.value;
+    if (val) {
+      remoteDirInput.value = val;
+      log(`Remote dir seleccionat: ${val}`);
+    }
+  });
+}
+
+function joinRemotePath(base, sub) {
+  const cleanBase = (base || '').replace(/\/+$/, '');
+  const cleanSub = (sub || '').replace(/^\/+/, '');
+  return cleanSub ? `${cleanBase}/${cleanSub}` : cleanBase;
+}
+
+if (btnComposeRemote && newSubfolderInput) {
+  btnComposeRemote.addEventListener('click', () => {
+    const baseFromList = remoteDirList.value || remoteRootSelect?.value || '';
+    const sub = newSubfolderInput.value.trim();
+    if (!baseFromList) {
+      remoteDirHint.textContent = 'Selecciona una base o carpeta llistada primer.';
+      return;
+    }
+    const composed = joinRemotePath(baseFromList, sub);
+    remoteDirInput.value = composed;
+    log(`Remote dir establert: ${composed}`);
+  });
+}
+
+if (btnCancelUpload) {
+  btnCancelUpload.addEventListener('click', async () => {
+    if (!currentUploadProc) {
+      log('No hi ha cap upload en curs');
+      return;
+    }
+    log('Cancel·lant upload en curs...');
+    const proc = currentUploadProc;
+    proc.kill('SIGINT');
+    if (chkDeleteOnCancel?.checked && currentUploadRemoteTarget && currentUploadProfile) {
+      try {
+        const res = await deleteRemotePath(currentUploadProfile, currentUploadRemoteTarget);
+        log(`Remote esborrat: ${res}`);
+      } catch (err) {
+        log(`ERROR esborrant remot: ${String(err.message || err)}`);
+      }
+    }
+    showProgressUI(false);
+  });
+}
 
 function bootstrap() {
   try {

@@ -21,12 +21,41 @@
     <div style="opacity: 0.8; font-size: 12px; margin-top: 4px;">
       Default: <span id="remoteDirDefaultLabel"></span>
     </div>
+    <div style="margin-top:8px; padding:8px; border:1px dashed #bbb;">
+      <div style="margin-bottom:6px;"><b>Ajuda per seleccionar destí remot</b></div>
+      <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+        <label for="remoteRootSelect" style="min-width:90px;">Base</label>
+        <select id="remoteRootSelect">
+          <option value="/srv/storage-media">/srv/storage-media</option>
+          <option value="/srv/storage-2md">/srv/storage-2md</option>
+        </select>
+        <button id="btnFetchRemoteDirs">Llistar</button>
+      </div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <label for="remoteDirList" style="min-width:90px;">Subcarpeta</label>
+        <select id="remoteDirList" style="flex:1;">
+          <option value="">(tria una carpeta llistada)</option>
+        </select>
+        <button id="btnUseRemoteDir">Usa</button>
+      </div>
+      <div style="display:flex; gap:6px; align-items:center; margin-top:6px;">
+        <label for="newSubfolderInput" style="min-width:90px;">Subcarpeta nova</label>
+        <input id="newSubfolderInput" type="text" placeholder="ex: projecte_X" style="flex:1;" />
+        <button id="btnComposeRemote">Construeix camí</button>
+      </div>
+      <div id="remoteDirHint" style="opacity:0.7; font-size:12px; margin-top:4px;">Llista només directoris (nivell 2) dins la base seleccionada.</div>
+    </div>
   </div>
 </div>
-	
+
     <button id="btnTest">Test connection</button>
     <button id="btnUpload">Upload file(s)</button>
     <button id="btnUploadFolder">Upload folder</button>
+    <button id="btnCancelUpload" style="margin-left:6px;">Cancel·la upload</button>
+    <label style="margin-left:8px; font-size:12px;">
+      <input type="checkbox" id="chkDeleteOnCancel" />
+      Esborra remot si es cancel·la
+    </label>
 
     <div id="uploadProgressWrap" style="margin-top:12px; padding:12px; border:1px solid #ccc; display:none;">
       <div style="margin-bottom:6px;">

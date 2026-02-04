@@ -58,13 +58,15 @@ server_uploader/
   "version": 1,
   "defaultProfile": "nebraska",
   "remoteDirDefault": "/srv/storage-media/uploads_test",
+  "remoteRoots": ["/srv/storage-media", "/srv/storage-2md"],  // opcional fallback per tots els perfils
   "profiles": {
     "nebraska": {
       "type": "ssh",
       "host": "192.168.1.35",
       "port": 22,
       "user": "d",
-      "identityFile": "~/.ssh/id_ed25519"
+      "identityFile": "~/.ssh/id_ed25519",
+      "remoteRoots": ["/srv/storage-media", "/srv/storage-2md"]  // opcional, prioritza sobre remoteRoots global
     }
   }
 }
