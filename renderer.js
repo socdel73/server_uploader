@@ -6,6 +6,10 @@ const { spawn } = require('child_process');
 const { ipcRenderer } = require('electron');
 
 const out = document.getElementById('out');
+const selLogs = document.getElementById('selLogs');
+const btnRefreshLogs = document.getElementById('btnRefreshLogs');
+const btnOpenLogsFolder = document.getElementById('btnOpenLogsFolder');
+const btnViewLogRaw = document.getElementById('btnViewLogRaw');
 const btn = document.getElementById('btnTest');
 
 const profileSelect = document.getElementById('profileSelect');
@@ -19,15 +23,7 @@ const btnUseRemoteDir = document.getElementById('btnUseRemoteDir');
 const remoteDirHint = document.getElementById('remoteDirHint');
 const newSubfolderInput = document.getElementById('newSubfolderInput');
 const btnComposeRemote = document.getElementById('btnComposeRemote');
-const uploadProgressWrap = document.getElementById('uploadProgressWrap');
-const uploadFileNameEl = document.getElementById('uploadFileName');
-const uploadProgressBar = document.getElementById('uploadProgressBar');
-const uploadTransferredEl = document.getElementById('uploadTransferred');
-const uploadTotalEl = document.getElementById('uploadTotal');
-const uploadPercentEl = document.getElementById('uploadPercent');
-const uploadSpeedEl = document.getElementById('uploadSpeed');
-
-const uploadEtaEl = document.getElementById('uploadEta');
+const uploadsList = document.getElementById('uploadsList');
 const btnCancelUpload = document.getElementById('btnCancelUpload');
 const chkDeleteOnCancel = document.getElementById('chkDeleteOnCancel');
 
@@ -38,9 +34,86 @@ let configCache = null;
 // Remote dir override per profile (in-memory)
 const remoteDirByProfile = {};
 const remoteRootsByProfile = {};
-let currentUploadProc = null;
-let currentUploadRemoteTarget = null;
-let currentUploadProfile = null;
+// Track active uploads (supports parallel uploads)
+const activeUploads = new Map(); // uploadId -> { proc, remoteTarget, profile }
+let colorIndex = 0;
+const COLOR_COUNT = 6;
+
+// Session log file (one per user action)
+let currentLogFile = null;
+
+function ensureLogsDir() {
+  const dir = path.join(os.homedir(), '.config', 'server_uploader', 'logs');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function listLocalLogs() {
+  const dir = ensureLogsDir();
+  const files = fs.readdirSync(dir)
+    .filter((f) => f.endsWith('.log'))
+    .map((f) => ({
+      name: f,
+      full: path.join(dir, f),
+      mtime: fs.statSync(path.join(dir, f)).mtimeMs,
+    }))
+    .sort((a, b) => b.mtime - a.mtime); // newest first
+  return files;
+}
+
+function refreshLogsSelect() {
+  if (!selLogs) return;
+  const logs = listLocalLogs();
+  selLogs.innerHTML = '';
+
+  if (!logs.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '(no logs)';
+    selLogs.appendChild(opt);
+    return;
+  }
+
+  for (const l of logs) {
+    const opt = document.createElement('option');
+    opt.value = l.full;
+    opt.textContent = l.name;
+    selLogs.appendChild(opt);
+  }
+
+  // Keep current selection if possible
+  if (currentLogFile && logs.some((l) => l.full === currentLogFile)) {
+    selLogs.value = currentLogFile;
+  }
+}
+
+function viewSelectedLogRaw() {
+  if (!selLogs || !out) return;
+  const p = selLogs.value;
+  if (!p) {
+    log('No log selected');
+    return;
+  }
+  try {
+    const raw = fs.readFileSync(p, 'utf8');
+    out.textContent = raw;
+  } catch (err) {
+    log(`ERROR reading log: ${String(err.message || err)}`);
+  }
+}
+
+function tsForFilename(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+function startLogSession(kind) {
+  const dir = ensureLogsDir();
+  currentLogFile = path.join(dir, `${tsForFilename()}_${kind}.log`);
+  fs.writeFileSync(currentLogFile, `# server_uploader log\n# kind: ${kind}\n# started: ${new Date().toISOString()}\n\n`, 'utf8');
+  refreshLogsSelect();
+  return currentLogFile;
+}
 
 function log(line) {
   if (!out) {
@@ -48,6 +121,13 @@ function log(line) {
     return;
   }
   out.textContent += line + '\n';
+  if (currentLogFile) {
+    try {
+      fs.appendFileSync(currentLogFile, line + '\n', 'utf8');
+    } catch (_) {
+      // ignore log write errors
+    }
+  }
 }
 
 function bytesToHuman(bytes) {
@@ -76,32 +156,77 @@ function humanToBytes(token) {
   return Math.round(num * mult);
 }
 
-function showProgressUI(show) {
-  if (!uploadProgressWrap) return;
-  uploadProgressWrap.style.display = show ? 'block' : 'none';
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
 }
 
-function resetProgressUI(filename, totalBytes) {
-  showProgressUI(true);
-  if (uploadFileNameEl) uploadFileNameEl.textContent = filename || 'Upload';
-  if (uploadProgressBar) uploadProgressBar.value = 0;
-  if (uploadTransferredEl) uploadTransferredEl.textContent = bytesToHuman(0);
-  if (uploadTotalEl) uploadTotalEl.textContent = totalBytes ? bytesToHuman(totalBytes) : '—';
-  if (uploadPercentEl) uploadPercentEl.textContent = '0';
-  if (uploadSpeedEl) uploadSpeedEl.textContent = '–';
-  if (uploadEtaEl) uploadEtaEl.textContent = '–';
+function makeUploadId(prefix = 'u') {
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-function updateProgressUI(transferredBytes, totalBytes, speed, eta, pctOverride) {
-  const pct = Number.isFinite(pctOverride)
-    ? Math.min(100, Math.max(0, Math.round(pctOverride)))
-    : (totalBytes > 0 ? Math.min(100, Math.max(0, Math.round((transferredBytes / totalBytes) * 100))) : 0);
-  if (uploadProgressBar) uploadProgressBar.value = pct;
-  if (uploadTransferredEl) uploadTransferredEl.textContent = bytesToHuman(transferredBytes);
-  if (uploadTotalEl) uploadTotalEl.textContent = bytesToHuman(totalBytes);
-  if (uploadPercentEl) uploadPercentEl.textContent = String(pct);
-  if (uploadSpeedEl) uploadSpeedEl.textContent = speed || '–';
-  if (uploadEtaEl) uploadEtaEl.textContent = eta || '–';
+function createUploadRow({ uploadId, title, totalBytes, remoteDir }) {
+  if (!uploadsList) return null;
+
+  const row = document.createElement('div');
+  row.className = 'upload-row';
+  row.dataset.uploadId = uploadId;
+  row.dataset.color = String(colorIndex % COLOR_COUNT);
+  colorIndex += 1;
+
+  const totalText = totalBytes > 0 ? bytesToHuman(totalBytes) : '—';
+
+  row.innerHTML = `
+    <div class="upload-grid">
+      <div class="upload-label" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+      <div class="mono" data-role="xfer">0 B / ${escapeHtml(totalText)}</div>
+      <div class="mono" title="${escapeHtml(remoteDir || '')}">${escapeHtml(remoteDir || '')}</div>
+      <div><span class="badge" data-role="status">queued</span></div>
+    </div>
+
+    <div class="progress-wrap">
+      <div class="progress-bar" data-role="bar" style="width:0%"></div>
+    </div>
+
+    <div class="mono" style="margin-top:8px; opacity:.85;" data-role="meta">0% • – • –</div>
+  `;
+
+  uploadsList.appendChild(row);
+  return row;
+}
+
+function updateUploadRow(uploadId, { transferredBytes, totalBytes, percent, speed, eta, status }) {
+  if (!uploadsList) return;
+  const row = uploadsList.querySelector(`.upload-row[data-upload-id="${uploadId}"]`);
+  if (!row) return;
+
+  const bar = row.querySelector('[data-role="bar"]');
+  const xfer = row.querySelector('[data-role="xfer"]');
+  const meta = row.querySelector('[data-role="meta"]');
+  const st = row.querySelector('[data-role="status"]');
+
+  const pct = Number.isFinite(percent)
+    ? Math.min(100, Math.max(0, Math.round(percent)))
+    : (totalBytes > 0 && Number.isFinite(transferredBytes)
+      ? Math.min(100, Math.max(0, Math.round((transferredBytes / totalBytes) * 100)))
+      : 0);
+
+  if (bar) bar.style.width = `${pct}%`;
+
+  const totalText = totalBytes > 0 ? bytesToHuman(totalBytes) : '—';
+  const xferText = Number.isFinite(transferredBytes) ? bytesToHuman(transferredBytes) : '0 B';
+  if (xfer) xfer.textContent = `${xferText} / ${totalText}`;
+
+  const sp = speed || '–';
+  const et = eta || '–';
+  if (meta) meta.textContent = `${pct}% • ${sp} • ${et}`;
+
+  if (status && st) st.textContent = status;
 }
 
 function expandHome(p) {
@@ -187,7 +312,42 @@ function testSSH(profile) {
   });
 }
 
-function uploadFile(profile, localFile, remoteDir, onProgress) {
+// Ensure remoteDir exists and is a directory, or create it. If not a dir, reject.
+function ensureRemoteDir(profile, remoteDir) {
+  return new Promise((resolve, reject) => {
+    const host = profile.host;
+    const port = String(profile.port ?? 22);
+    const user = profile.user;
+    const key = expandHome(profile.identityFile);
+
+    // Resolve symlinks (important: rsync can fail if the dest path is a symlink).
+    // Return the resolved path so callers can use it.
+    const cmd = `REAL=\"${remoteDir}\"; `
+      + `R2=$(readlink -f \"${remoteDir}\" 2>/dev/null); `
+      + `if [ -n \"$R2\" ]; then REAL=\"$R2\"; fi; `
+      + `if [ -d \"$REAL\" ]; then echo \"$REAL\"; exit 0; fi; `
+      + `if [ -e \"$REAL\" ]; then echo \"NOT_A_DIR:$REAL\"; exit 2; fi; `
+      + `mkdir -p \"$REAL\" && echo \"$REAL\"`;
+
+    const args = ['-i', key, '-p', port, `${user}@${host}`, cmd];
+    const proc = spawn('ssh', args);
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (d) => (stdout += d.toString()));
+    proc.stderr.on('data', (d) => (stderr += d.toString()));
+    proc.on('close', (code) => {
+      const out = stdout.trim();
+      if (code === 0) return resolve(out || remoteDir);
+      if (code === 2 || out.startsWith('NOT_A_DIR:')) {
+        const p = out.replace(/^NOT_A_DIR:/, '') || remoteDir;
+        return reject(new Error(`Remote path exists but is not a directory: ${p}`));
+      }
+      return reject(new Error(`ssh ensureRemoteDir exit ${code}\n${stderr.trim()}`));
+    });
+  });
+}
+
+function uploadFile(profile, localFile, remoteDir, uploadId, onProgress) {
   return new Promise((resolve, reject) => {
     const host = profile.host;
     const port = String(profile.port ?? 22);
@@ -207,9 +367,8 @@ function uploadFile(profile, localFile, remoteDir, onProgress) {
     ];
 
     const proc = spawn('rsync', args);
-    currentUploadProc = proc;
-    currentUploadRemoteTarget = `${remoteDir.replace(/\/+$/, '')}/${path.basename(localFile)}`;
-    currentUploadProfile = profile;
+    const remoteTarget = `${remoteDir.replace(/\/+$/, '')}/${path.basename(localFile)}`;
+    activeUploads.set(uploadId, { proc, remoteTarget, profile });
 
     let stdoutBuf = '';
     let stderr = '';
@@ -248,9 +407,7 @@ function uploadFile(profile, localFile, remoteDir, onProgress) {
     });
 
     proc.on('close', (code) => {
-      currentUploadProc = null;
-      currentUploadRemoteTarget = null;
-      currentUploadProfile = null;
+      activeUploads.delete(uploadId);
       if (code === 0) {
         resolve('UPLOAD_OK');
       } else {
@@ -259,7 +416,7 @@ function uploadFile(profile, localFile, remoteDir, onProgress) {
     });
   });
 }
-function uploadFolder(profile, localDir, remoteDir, onProgress) {
+function uploadFolder(profile, localDir, remoteDir, uploadId, onProgress) {
   return new Promise((resolve, reject) => {
     const host = profile.host;
     const port = String(profile.port ?? 22);
@@ -303,9 +460,7 @@ function uploadFolder(profile, localDir, remoteDir, onProgress) {
       ];
 
       const proc = spawn('rsync', args);
-      currentUploadProc = proc;
-      currentUploadRemoteTarget = remoteTarget;
-      currentUploadProfile = profile;
+      activeUploads.set(uploadId, { proc, remoteTarget, profile });
 
       let stdoutBuf = '';
       let stderr = '';
@@ -342,9 +497,7 @@ function uploadFolder(profile, localDir, remoteDir, onProgress) {
       });
 
       proc.on('close', (code2) => {
-        currentUploadProc = null;
-        currentUploadRemoteTarget = null;
-        currentUploadProfile = null;
+        activeUploads.delete(uploadId);
         if (code2 === 0) resolve('UPLOAD_OK');
         else reject(new Error(`rsync exit ${code2}\n${stderr.trim()}`));
       });
@@ -423,6 +576,8 @@ const btnUploadFolder = document.getElementById('btnUploadFolder');
 
 btnUpload.addEventListener('click', async () => {
   out.textContent = '';
+  if (uploadsList) uploadsList.innerHTML = '';
+  startLogSession('upload_files');
   try {
     const { profile } = getActiveProfile();
 
@@ -454,42 +609,88 @@ btnUpload.addEventListener('click', async () => {
     // Remember per-profile override (in-memory)
     remoteDirByProfile[activeProfileName || profileSelect.value] = remoteDir;
 
-    log(`Remote dir: ${remoteDir}`);
+    log('Ensuring remote dir exists...');
+    const remoteDirResolved = await ensureRemoteDir(profile, remoteDir);
+
+    log(`Remote dir: ${remoteDirResolved}`);
     log(`Files selected: ${files.length}`);
 
-    // Upload sequentially (simple + robust)
-    for (let i = 0; i < files.length; i += 1) {
-      const localFile = files[i];
-      const filename = path.basename(localFile);
-      const totalBytes = fs.statSync(localFile).size;
+    // Upload in parallel with a small concurrency limit (robust + fast)
+    const MAX_PARALLEL = 3;
 
-      // Reset per-file progress UI
-      resetProgressUI(`${i + 1}/${files.length} — ${filename}`, totalBytes);
+    async function runPool(items, limit, worker) {
+      const executing = new Set();
+      const results = [];
 
-      log('---');
-      log(`Uploading (${i + 1}/${files.length}): ${localFile}`);
-      log('Uploading via rsync (SSH)...');
+      for (const item of items) {
+        const p = Promise.resolve().then(() => worker(item));
+        results.push(p);
+        executing.add(p);
 
-      const result = await uploadFile(profile, localFile, remoteDir, ({ transferredBytes, percent, speed, eta }) => {
-        updateProgressUI(transferredBytes, totalBytes, speed, eta, percent);
-      });
+        const clean = () => executing.delete(p);
+        p.then(clean).catch(clean);
 
-      log(`Result: ${result}`);
-      updateProgressUI(totalBytes, totalBytes, '-', '0:00:00', 100);
+        if (executing.size >= limit) {
+          await Promise.race(executing);
+        }
+      }
+
+      return Promise.allSettled(results);
     }
 
-    log('---');
-    log('All uploads finished.');
+    const settled = await runPool(files.map((localFile, idx) => ({ localFile, idx })), MAX_PARALLEL, async ({ localFile, idx }) => {
+      const filename = path.basename(localFile);
+      const totalBytes = fs.statSync(localFile).size;
+      const uploadId = makeUploadId('file');
+
+      createUploadRow({
+        uploadId,
+        title: `${idx + 1}/${files.length} — ${filename}`,
+        totalBytes,
+        remoteDir: remoteDirResolved,
+      });
+
+      updateUploadRow(uploadId, { status: 'uploading', transferredBytes: 0, totalBytes, percent: 0, speed: '–', eta: '–' });
+
+      log('---');
+      log(`Uploading (${idx + 1}/${files.length}): ${localFile}`);
+
+      try {
+        const result = await uploadFile(profile, localFile, remoteDirResolved, uploadId, ({ transferredBytes, percent, speed, eta }) => {
+          updateUploadRow(uploadId, { transferredBytes, totalBytes, percent, speed, eta, status: 'uploading' });
+        });
+
+        updateUploadRow(uploadId, { transferredBytes: totalBytes, totalBytes, percent: 100, speed: '-', eta: '0:00:00', status: 'done' });
+        log(`Result: ${result}`);
+      } catch (err) {
+        updateUploadRow(uploadId, { status: 'error', speed: '–', eta: '–' });
+        log(`ERROR (${idx + 1}/${files.length}): ${String(err.message || err)}`);
+        throw err;
+      }
+    });
+
+    const failed = settled.filter((r) => r.status === 'rejected');
+    if (failed.length) {
+      log('---');
+      log(`Finished with errors: ${failed.length}/${files.length}`);
+      failed.forEach((r) => log(String(r.reason?.message || r.reason || r)));
+    } else {
+      log('---');
+      log('All uploads finished.');
+      if (currentLogFile) log(`Log saved: ${currentLogFile}`);
+    }
   } catch (err) {
-    showProgressUI(false);
     log('--- ERROR ---');
     log(String(err.message || err));
+    if (currentLogFile) log(`Log saved: ${currentLogFile}`);
   }
 });
 
 if (btnUploadFolder) {
   btnUploadFolder.addEventListener('click', async () => {
     out.textContent = '';
+    if (uploadsList) uploadsList.innerHTML = '';
+    startLogSession('upload_folder');
     try {
       const { profile } = getActiveProfile();
 
@@ -499,6 +700,9 @@ if (btnUploadFolder) {
       }
 
       remoteDirByProfile[activeProfileName || profileSelect.value] = remoteDir;
+
+      log('Ensuring remote dir exists...');
+      const remoteDirResolved = await ensureRemoteDir(profile, remoteDir);
 
       // Select a local folder
       const res = await ipcRenderer.invoke('pick-folder');
@@ -511,24 +715,33 @@ if (btnUploadFolder) {
       const folderName = path.basename(localDir);
 
       // Unknown total without scanning; show percent + transferred.
-      resetProgressUI(`folder — ${folderName}`, 0);
+      const uploadId = makeUploadId('folder');
+      createUploadRow({ uploadId, title: `folder — ${folderName}`, totalBytes: 0, remoteDir: remoteDirResolved });
+      updateUploadRow(uploadId, { status: 'uploading', transferredBytes: 0, totalBytes: 0, percent: 0, speed: '–', eta: '–' });
 
-      log(`Remote dir: ${remoteDir}`);
+      log(`Remote dir: ${remoteDirResolved}`);
       log(`Uploading folder: ${localDir}`);
       log('Uploading folder via rsync (SSH)...');
 
-      const result = await uploadFolder(profile, localDir, remoteDir, ({ transferredBytes, percent, speed, eta }) => {
-        updateProgressUI(transferredBytes, 0, speed, eta, percent);
-      });
+      try {
+        const result = await uploadFolder(profile, localDir, remoteDirResolved, uploadId, ({ transferredBytes, percent, speed, eta }) => {
+          updateUploadRow(uploadId, { transferredBytes, totalBytes: 0, percent, speed, eta, status: 'uploading' });
+        });
 
-      log(`Result: ${result}`);
-      updateProgressUI(0, 0, '-', '0:00:00', 100);
-      log('---');
-      log('Folder upload finished.');
+        log(`Result: ${result}`);
+        updateUploadRow(uploadId, { transferredBytes: 0, totalBytes: 0, percent: 100, speed: '-', eta: '0:00:00', status: 'done' });
+        log('---');
+        log('Folder upload finished.');
+        if (currentLogFile) log(`Log saved: ${currentLogFile}`);
+      } catch (err) {
+        updateUploadRow(uploadId, { status: 'error', speed: '–', eta: '–' });
+        log(`ERROR folder: ${String(err.message || err)}`);
+        throw err;
+      }
     } catch (err) {
-      showProgressUI(false);
       log('--- ERROR ---');
       log(String(err.message || err));
+      if (currentLogFile) log(`Log saved: ${currentLogFile}`);
     }
   });
 }
@@ -623,22 +836,37 @@ if (btnComposeRemote && newSubfolderInput) {
 
 if (btnCancelUpload) {
   btnCancelUpload.addEventListener('click', async () => {
-    if (!currentUploadProc) {
+    if (activeUploads.size === 0) {
       log('No hi ha cap upload en curs');
       return;
     }
-    log('Cancel·lant upload en curs...');
-    const proc = currentUploadProc;
-    proc.kill('SIGINT');
-    if (chkDeleteOnCancel?.checked && currentUploadRemoteTarget && currentUploadProfile) {
+
+    log(`Cancel·lant ${activeUploads.size} upload(s) en curs...`);
+
+    const entries = Array.from(activeUploads.entries());
+
+    // First, signal all rsync processes
+    for (const [uploadId, info] of entries) {
       try {
-        const res = await deleteRemotePath(currentUploadProfile, currentUploadRemoteTarget);
-        log(`Remote esborrat: ${res}`);
-      } catch (err) {
-        log(`ERROR esborrant remot: ${String(err.message || err)}`);
+        info.proc.kill('SIGINT');
+        updateUploadRow(uploadId, { status: 'cancelling' });
+      } catch (_) {
+        // ignore
       }
     }
-    showProgressUI(false);
+
+    // Optionally delete remote targets
+    if (chkDeleteOnCancel?.checked) {
+      for (const [uploadId, info] of entries) {
+        if (!info.remoteTarget || !info.profile) continue;
+        try {
+          const res = await deleteRemotePath(info.profile, info.remoteTarget);
+          log(`Remote esborrat (${uploadId}): ${res}`);
+        } catch (err) {
+          log(`ERROR esborrant remot (${uploadId}): ${String(err.message || err)}`);
+        }
+      }
+    }
   });
 }
 
@@ -647,10 +875,48 @@ function bootstrap() {
     configCache = loadConfig();
     initProfiles(configCache);
     log('Config loaded');
+    refreshLogsSelect();
   } catch (err) {
     log('ERROR loading config');
     log(String(err.message || err));
   }
+}
+
+// --- Log UI (raw viewer) ---
+if (btnRefreshLogs) {
+  btnRefreshLogs.addEventListener('click', () => {
+    try {
+      refreshLogsSelect();
+      log('Logs refreshed');
+    } catch (err) {
+      log(`ERROR refreshing logs: ${String(err.message || err)}`);
+    }
+  });
+}
+
+if (btnViewLogRaw) {
+  btnViewLogRaw.addEventListener('click', () => {
+    viewSelectedLogRaw();
+  });
+}
+
+if (selLogs) {
+  selLogs.addEventListener('change', () => {
+    // lightweight: don't auto-load on change; keep it manual unless you prefer auto.
+    // If you want auto-load, uncomment next line:
+    // viewSelectedLogRaw();
+  });
+}
+
+if (btnOpenLogsFolder) {
+  btnOpenLogsFolder.addEventListener('click', async () => {
+    try {
+      const dir = await ipcRenderer.invoke('open-logs-folder');
+      log(`Opened logs folder: ${dir}`);
+    } catch (err) {
+      log(`ERROR opening logs folder: ${String(err.message || err)}`);
+    }
+  });
 }
 
 if (document.readyState === 'loading') {

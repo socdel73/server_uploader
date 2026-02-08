@@ -1,77 +1,303 @@
 <!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Server Uploader</title>
-  </head>
-  <body>
-    <h1>Server Uploader</h1>
 
-<div style="margin: 12px 0; padding: 12px; border: 1px solid #ccc;">
-  <div style="margin-bottom: 8px;">
-    <label for="profileSelect"><b>Profile</b></label><br />
-    <select id="profileSelect"></select>
-    <span id="activeProfileLabel" style="margin-left: 8px; opacity: 0.8;"></span>
+<head>
+  <meta charset="utf-8" />
+  <title>Server Uploader</title>
+
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: rgba(255, 255, 255, 0.06);
+      --border: rgba(255, 255, 255, 0.16);
+      --text: rgba(255, 255, 255, 0.92);
+      --muted: rgba(255, 255, 255, 0.70);
+    }
+
+    body {
+      margin: 0;
+      padding: 18px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    h1 {
+      margin: 0 0 14px 0;
+      font-size: 22px;
+    }
+
+    .panel {
+      margin: 12px 0;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+
+    .btnbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin: 10px 0;
+    }
+
+    button {
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    input,
+    select {
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.25);
+      color: var(--text);
+      outline: none;
+    }
+
+    code {
+      color: rgba(255, 255, 255, 0.88);
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    /* uploads list */
+    .uploads {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+
+      /* Tamany fixe del requadre d'uploads */
+      height: 360px;
+      /* ajusta a gust: 300/400/450 */
+      overflow-y: auto;
+      padding-right: 6px;
+      /* espai per scrollbar */
+    }
+
+    .uploads::-webkit-scrollbar {
+      width: 10px;
+    }
+
+    .uploads::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.14);
+      border-radius: 999px;
+      border: 2px solid rgba(0, 0, 0, 0.35);
+    }
+
+    .uploads::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .upload-row {
+      border: 2px solid rgba(255, 255, 255, 0.18);
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.06);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+    }
+
+    .upload-grid {
+      display: grid;
+      grid-template-columns: 1.4fr 0.8fr 0.8fr 0.6fr;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .upload-label {
+      font-weight: 650;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.86);
+    }
+
+    .badge {
+      display: inline-flex;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(0, 0, 0, 0.18);
+    }
+
+    .progress-wrap {
+      margin-top: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.10);
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.60);
+      transition: width 120ms linear;
+    }
+
+    /* colors alterns per upload (cicle de 6) */
+    .upload-row[data-color="0"] {
+      background: rgba(64, 140, 255, 0.10);
+      border-color: rgba(64, 140, 255, 0.28);
+    }
+
+    .upload-row[data-color="1"] {
+      background: rgba(255, 140, 64, 0.10);
+      border-color: rgba(255, 140, 64, 0.28);
+    }
+
+    .upload-row[data-color="2"] {
+      background: rgba(110, 255, 160, 0.10);
+      border-color: rgba(110, 255, 160, 0.28);
+    }
+
+    .upload-row[data-color="3"] {
+      background: rgba(220, 120, 255, 0.10);
+      border-color: rgba(220, 120, 255, 0.28);
+    }
+
+    .upload-row[data-color="4"] {
+      background: rgba(255, 220, 90, 0.10);
+      border-color: rgba(255, 220, 90, 0.28);
+    }
+
+    .upload-row[data-color="5"] {
+      background: rgba(120, 230, 255, 0.10);
+      border-color: rgba(120, 230, 255, 0.28);
+    }
+
+    pre#out {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.35);
+      color: rgba(255, 255, 255, 0.85);
+
+      /* Fixed viewport for log output */
+      height: 220px;          /* ajusta a gust: 180 / 220 / 260 */
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    pre#out::-webkit-scrollbar{ width: 10px; }
+    pre#out::-webkit-scrollbar-thumb{
+      background: rgba(255,255,255,0.14);
+      border-radius: 999px;
+      border: 2px solid rgba(0,0,0,0.35);
+    }
+    pre#out::-webkit-scrollbar-track{ background: transparent; }
+
+    /* log toolbar */
+    #selLogs{
+      max-width: 340px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Server Uploader</h1>
+
+  <div class="panel">
+    <div style="margin-bottom: 8px;">
+      <label for="profileSelect"><b>Profile</b></label><br />
+      <select id="profileSelect"></select>
+      <span id="activeProfileLabel" style="margin-left: 8px; opacity: 0.8;"></span>
+    </div>
+
+    <div>
+      <label for="remoteDirInput"><b>Remote dir</b> (server path)</label><br />
+      <input id="remoteDirInput" type="text" style="width: 90%;" />
+      <div style="opacity: 0.8; font-size: 12px; margin-top: 4px;">Example: <code>/srv/storage-media/uploads_test</code>
+      </div>
+      <div style="opacity: 0.8; font-size: 12px; margin-top: 4px;">
+        Default: <span id="remoteDirDefaultLabel"></span>
+      </div>
+      <div style="margin-top:8px; padding:8px; border:1px dashed #bbb;">
+        <div style="margin-bottom:6px;"><b>Ajuda per seleccionar destí remot</b></div>
+        <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+          <label for="remoteRootSelect" style="min-width:90px;">Base</label>
+          <select id="remoteRootSelect">
+            <option value="/srv/storage-media">/srv/storage-media</option>
+            <option value="/srv/storage-2md">/srv/storage-2md</option>
+          </select>
+          <button id="btnFetchRemoteDirs">Llistar</button>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <label for="remoteDirList" style="min-width:90px;">Subcarpeta</label>
+          <select id="remoteDirList" style="flex:1;">
+            <option value="">(tria una carpeta llistada)</option>
+          </select>
+          <button id="btnUseRemoteDir">Usa</button>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center; margin-top:6px;">
+          <label for="newSubfolderInput" style="min-width:90px;">Subcarpeta nova</label>
+          <input id="newSubfolderInput" type="text" placeholder="ex: projecte_X" style="flex:1;" />
+          <button id="btnComposeRemote">Construeix camí</button>
+        </div>
+        <div id="remoteDirHint" style="opacity:0.7; font-size:12px; margin-top:4px;">Llista només directoris (nivell 2)
+          dins la base seleccionada.</div>
+      </div>
+    </div>
   </div>
 
-  <div>
-    <label for="remoteDirInput"><b>Remote dir</b> (server path)</label><br />
-    <input id="remoteDirInput" type="text" style="width: 100%;" />
-    <div style="opacity: 0.8; font-size: 12px; margin-top: 4px;">Example: <code>/srv/storage-media/uploads_test</code></div>
-    <div style="opacity: 0.8; font-size: 12px; margin-top: 4px;">
-      Default: <span id="remoteDirDefaultLabel"></span>
-    </div>
-    <div style="margin-top:8px; padding:8px; border:1px dashed #bbb;">
-      <div style="margin-bottom:6px;"><b>Ajuda per seleccionar destí remot</b></div>
-      <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
-        <label for="remoteRootSelect" style="min-width:90px;">Base</label>
-        <select id="remoteRootSelect">
-          <option value="/srv/storage-media">/srv/storage-media</option>
-          <option value="/srv/storage-2md">/srv/storage-2md</option>
-        </select>
-        <button id="btnFetchRemoteDirs">Llistar</button>
-      </div>
-      <div style="display:flex; gap:6px; align-items:center;">
-        <label for="remoteDirList" style="min-width:90px;">Subcarpeta</label>
-        <select id="remoteDirList" style="flex:1;">
-          <option value="">(tria una carpeta llistada)</option>
-        </select>
-        <button id="btnUseRemoteDir">Usa</button>
-      </div>
-      <div style="display:flex; gap:6px; align-items:center; margin-top:6px;">
-        <label for="newSubfolderInput" style="min-width:90px;">Subcarpeta nova</label>
-        <input id="newSubfolderInput" type="text" placeholder="ex: projecte_X" style="flex:1;" />
-        <button id="btnComposeRemote">Construeix camí</button>
-      </div>
-      <div id="remoteDirHint" style="opacity:0.7; font-size:12px; margin-top:4px;">Llista només directoris (nivell 2) dins la base seleccionada.</div>
-    </div>
-  </div>
-</div>
-
+  <div class="btnbar">
     <button id="btnTest">Test connection</button>
     <button id="btnUpload">Upload file(s)</button>
     <button id="btnUploadFolder">Upload folder</button>
-    <button id="btnCancelUpload" style="margin-left:6px;">Cancel·la upload</button>
-    <label style="margin-left:8px; font-size:12px;">
+    <button id="btnCancelUpload">Cancel·la upload</button>
+
+    <label style="font-size:12px;">
       <input type="checkbox" id="chkDeleteOnCancel" />
       Esborra remot si es cancel·la
     </label>
+  </div>
 
-    <div id="uploadProgressWrap" style="margin-top:12px; padding:12px; border:1px solid #ccc; display:none;">
-      <div style="margin-bottom:6px;">
-        <b id="uploadFileName">Upload</b>
-      </div>
-      <progress id="uploadProgressBar" value="0" max="100" style="width:100%; height:18px;"></progress>
-      <div style="margin-top:6px; opacity:0.85;">
-        <span id="uploadTransferred">0</span> / <span id="uploadTotal">0</span>
-        &nbsp;(<span id="uploadPercent">0</span>%)
-        &nbsp;•&nbsp;<span id="uploadSpeed">–</span>
-        &nbsp;•&nbsp;<span id="uploadEta">–</span>
+  <div class="panel">
+    <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+      <b>Uploads</b>
+      <span class="muted" id="uploadsHint">Cada upload apareix com una targeta.</span>
+    </div>
+
+    <div id="uploadsList" class="uploads"></div>
+  </div>
+
+  <div class="panel">
+    <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:8px;">
+      <b>Log</b>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <select id="selLogs" title="Selecciona un log" style="max-width:340px;"></select>
+        <button id="btnRefreshLogs" title="Refresca la llista de logs">Refresca</button>
+        <button id="btnViewLogRaw" title="Veure el log seleccionat en brut">Veure brut</button>
+        <button id="btnOpenLogsFolder" title="Obre la carpeta de logs">Carpeta logs</button>
       </div>
     </div>
 
-    <pre id="out" style="margin-top:12px; padding:12px; border:1px solid #ccc;"></pre>
+    <pre id="out"></pre>
+  </div>
 
-    <script src="./renderer.js"></script>
-  </body>
+  <script src="./renderer.js"></script>
+</body>
+
 </html>
