@@ -1,7 +1,39 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+
 const { spawn } = require('child_process');
+// --- RSYNC RESOLUTION (robust binary selection) ---
+function resolveRsyncBinary() {
+  const candidates = [
+    '/opt/homebrew/bin/rsync',
+    '/usr/local/bin/rsync',
+    '/usr/bin/rsync'
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch (_) {}
+  }
+  return 'rsync'; // fallback to PATH
+}
+
+function logRsyncInfo() {
+  try {
+    const bin = resolveRsyncBinary();
+    log(`Rsync bin: ${bin}`);
+    const v = spawn(bin, ['--version']);
+    let outBuf = '';
+    v.stdout.on('data', (d) => (outBuf += d.toString()));
+    v.on('close', () => {
+      const firstLine = outBuf.split('\n')[0] || '';
+      if (firstLine) log(`Rsync version: ${firstLine}`);
+    });
+  } catch (err) {
+    log(`ERROR checking rsync version: ${String(err.message || err)}`);
+  }
+}
+// --- END RSYNC RESOLUTION ---
 
 const { ipcRenderer } = require('electron');
 
@@ -366,7 +398,9 @@ function uploadFile(profile, localFile, remoteDir, uploadId, onProgress) {
       `${user}@${host}:${remoteDir}/`
     ];
 
-    const proc = spawn('rsync', args);
+    const rsyncBin = resolveRsyncBinary();
+    logRsyncInfo();
+    const proc = spawn(rsyncBin, args);
     const remoteTarget = `${remoteDir.replace(/\/+$/, '')}/${path.basename(localFile)}`;
     activeUploads.set(uploadId, { proc, remoteTarget, profile });
 
@@ -459,7 +493,9 @@ function uploadFolder(profile, localDir, remoteDir, uploadId, onProgress) {
         `${user}@${host}:${remoteTarget}/`
       ];
 
-      const proc = spawn('rsync', args);
+      const rsyncBin = resolveRsyncBinary();
+      logRsyncInfo();
+      const proc = spawn(rsyncBin, args);
       activeUploads.set(uploadId, { proc, remoteTarget, profile });
 
       let stdoutBuf = '';
