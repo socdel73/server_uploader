@@ -1,16 +1,36 @@
 {
-  "name": "server_uploader",
-  "version": "1.0.0",
-  "description": "",
+  "name": "server-uploader",
+  "version": "0.2.1",
+  "description": "Desktop app for uploading files and folders to servers",
   "main": "main.js",
-  "scripts": {
-    "start": "electron ."
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac"
+  },
+  "author": "socdel73",
+  "license": "ISC",
   "devDependencies": {
-    "electron": "^40.1.0"
+    "electron": "^40.1.0",
+    "electron-builder": "^26.7.0"
+  },
+  "build": {
+    "appId": "com.socdel73.serveruploader",
+    "productName": "Server Uploader",
+    "files": [
+      "**/*",
+      "!dist/**"
+    ],
+    "mac": {
+      "icon": "assets/icon.icns",
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "icon": "assets/icon.ico"
+    },
+    "linux": {
+      "icon": "assets/icon.png"
+    }
   }
 }

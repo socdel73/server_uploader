@@ -6,3 +6,6 @@ logs
 .idea
 .vscode
 config.json
+server_uploader.txt
+dist/
+icon.png

@@ -1,8 +1,15 @@
-const { app, BrowserWindow, ipcMain, dialog, screen, shell } = require('electron');
-const path = require('path');
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  dialog,
+  screen,
+  shell,
+} = require("electron");
+const path = require("path");
 
-const fs = require('fs');
-const os = require('os');
+const fs = require("fs");
+const os = require("os");
 
 function createWindow() {
   // Target content width: 670px (excluding body padding/margins). With current body padding (18px each side)
@@ -13,17 +20,19 @@ function createWindow() {
     minWidth: 720,
     minHeight: 760,
     useContentSize: true,
+    icon: path.join(__dirname, "assets", "icon.png"),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-    }
+    },
   });
 
-  win.loadFile(path.join(__dirname, 'index.html'));
+  win.loadFile(path.join(__dirname, "index.html"));
 
-  win.webContents.on('did-finish-load', async () => {
+  win.webContents.on("did-finish-load", async () => {
     try {
-      const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize;
+      const { width: screenW, height: screenH } =
+        screen.getPrimaryDisplay().workAreaSize;
 
       const { w, h } = await win.webContents.executeJavaScript(`
         ({
@@ -43,30 +52,46 @@ function createWindow() {
   });
 }
 
-ipcMain.handle('pick-file', async () => {
+ipcMain.handle("pick-file", async () => {
   const res = await dialog.showOpenDialog({
-    properties: ['openFile', 'multiSelections']
+    properties: ["openFile", "multiSelections"],
   });
   return res;
 });
 
-ipcMain.handle('pick-folder', async () => {
+ipcMain.handle("pick-folder", async () => {
   const res = await dialog.showOpenDialog({
-    properties: ['openDirectory']
+    properties: ["openDirectory"],
   });
   return res;
+});
+
+const { exec } = require("child_process");
+
+ipcMain.handle("createRemoteDir", async (_event, profile, fullPath) => {
+  return new Promise((resolve, reject) => {
+    const sshCmd = `ssh ${profile.user}@${profile.host} "mkdir -p '${fullPath}'"`;
+
+    exec(sshCmd, (error, stdout, stderr) => {
+      if (error) {
+        reject(stderr || error.message);
+      } else {
+        resolve(true);
+      }
+    });
+  });
 });
 
 // Backward-compatible alias (some renderer code may still call this)
-ipcMain.handle('pick-directory', async () => {
+ipcMain.handle("pick-directory", async () => {
   const res = await dialog.showOpenDialog({
-    properties: ['openDirectory']
+    properties: ["openDirectory"],
   });
   return res;
 });
 
-ipcMain.handle('open-logs-folder', async () => {
-  const logsDir = path.join(os.homedir(), '.config', 'server_uploader', 'logs');
+ipcMain.handle("open-logs-folder", async () => {
+  const logsDir = path.join(os.homedir(), ".config", "server_uploader", "logs");
   fs.mkdirSync(logsDir, { recursive: true });
   await shell.openPath(logsDir);
   return logsDir;
