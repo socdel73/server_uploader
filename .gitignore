@@ -1,8 +1,12 @@
-node_modules
+node_modules/
+dist/
 .DS_Store
 npm-debug.log*
-logs
+logs/
 *.log
-.idea
-.vscode
+.idea/
+.vscode/
 config.json
+server_uploader.txt
+server_uploader.zip
+icon.png

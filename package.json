@@ -1,14 +1,20 @@
 {
-  "name": "server_uploader",
+  "name": "server-uploader",
   "version": "1.0.0",
-  "description": "",
+  "description": "Electron desktop app for uploading files and folders to remote servers over SSH and rsync.",
   "main": "main.js",
   "scripts": {
     "start": "electron ."
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "electron",
+    "ssh",
+    "rsync",
+    "upload",
+    "deployment"
+  ],
+  "author": "socdel73",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "electron": "^40.1.0"

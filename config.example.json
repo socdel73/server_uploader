@@ -1,15 +1,28 @@
 {
   "version": 1,
-  "defaultProfile": "example",
-  "remoteRoots": ["/srv/<remote-path>", "/mnt/<another-path>"],
+  "defaultProfile": "production",
+  "remoteRoots": ["/srv/www", "/var/www"],
+  "remoteDirDefault": "/srv/www/uploads",
   "profiles": {
-    "example": {
+    "production": {
       "type": "ssh",
-      "host": "192.168.1.10",
+      "host": "your-server.example.com",
       "port": 22,
-      "user": "your_user",
+      "user": "deploy",
       "identityFile": "~/.ssh/id_ed25519",
-      "remoteRoots": ["/srv/<remote-path>", "/mnt/<another-path>"]
+      "knownHosts": "~/.ssh/known_hosts",
+      "remoteRoots": ["/srv/www", "/var/www"],
+      "remoteDirDefault": "/srv/www/uploads"
+    },
+    "staging": {
+      "type": "ssh",
+      "host": "staging.example.com",
+      "port": 22,
+      "user": "deploy",
+      "identityFile": "~/.ssh/id_ed25519",
+      "knownHosts": "~/.ssh/known_hosts",
+      "remoteRoots": ["/srv/staging", "/var/www/staging"],
+      "remoteDirDefault": "/srv/staging/uploads"
     }
   }
 }

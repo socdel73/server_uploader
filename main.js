@@ -8,11 +8,12 @@ function createWindow() {
   // Target content width: 670px (excluding body padding/margins). With current body padding (18px each side)
   // we start around 670 + 36 = 706px and then auto-fit to actual layout after load.
   const win = new BrowserWindow({
-    width: 720,
-    height: 900, // temporary; will be auto-fit after load
-    minWidth: 720,
+    width: 1280,
+    height: 920,
+    minWidth: 980,
     minHeight: 760,
     useContentSize: true,
+    backgroundColor: '#f6f3ea',
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,

@@ -1,61 +1,117 @@
 # Server Uploader
 
-App d’escriptori (Electron) per pujar fitxers i carpetes via SSH/rsync amb perfils configurables.
+Desktop app built with Electron to upload files and folders to remote servers over SSH and `rsync`.
 
-## Funcions
-- Perfils múltiples amb clau SSH.
-- Test ràpid de connexió.
-- Pujada de fitxers i carpetes amb barra de progrés.
-- Selector assistit de destins remots per perfil (`remoteRoots`) amb llistat via SSH.
-- Possibilitat d’afegir subcarpeta nova al camí seleccionat.
-- Cancel·lar l’upload i, opcionalment, esborrar el destí parcial.
+It is designed as a practical local utility for people who want a simple UI for recurring uploads without hardcoding server paths into the app itself.
 
-## Requisits
-- Node 18+ (Electron 40).
-- `ssh` i `rsync` instal·lats al sistema.
-- Fitxer de config local a `~/.config/server_uploader/config.json`.
+## Features
 
-## Configuració
-Exemple:
+- Multiple SSH profiles
+- Per-profile remote roots
+- Remote destination builder
+- File uploads
+- Folder uploads
+- Parallel file uploads
+- Upload queue with progress cards
+- Connection test
+- Session logs with local history
+- Optional remote cleanup after cancel
+
+## Requirements
+
+- Node.js 18+
+- `ssh` installed on the local machine
+- `rsync` installed on the local machine
+- Local config file at `~/.config/server_uploader/config.json`
+
+## Install
+
+```bash
+npm install
+npm start
+```
+
+## Configuration
+
+Copy the example config and adapt it to your own servers:
+
+```bash
+mkdir -p ~/.config/server_uploader
+cp config.example.json ~/.config/server_uploader/config.json
+```
+
+The app reads configuration from:
+
+```text
+~/.config/server_uploader/config.json
+```
+
+## Example config
+
 ```json
 {
   "version": 1,
-  "defaultProfile": "nebraska",
-  "remoteRoots": ["/srv/storage-media", "/srv/storage-2md"],
+  "defaultProfile": "production",
+  "remoteRoots": ["/srv/www", "/var/www"],
+  "remoteDirDefault": "/srv/www/uploads",
   "profiles": {
-    "nebraska": {
+    "production": {
       "type": "ssh",
-      "host": "192.168.1.35",
+      "host": "your-server.example.com",
       "port": 22,
-      "user": "d",
+      "user": "deploy",
       "identityFile": "~/.ssh/id_ed25519",
-      "remoteRoots": ["/srv/storage-media", "/srv/storage-2md"]
+      "knownHosts": "~/.ssh/known_hosts",
+      "remoteRoots": ["/srv/www", "/var/www"],
+      "remoteDirDefault": "/srv/www/uploads"
     },
-    "thunder": {
+    "staging": {
       "type": "ssh",
-      "host": "100.117.100.37",
+      "host": "staging.example.com",
       "port": 22,
-      "user": "superhero",
+      "user": "deploy",
       "identityFile": "~/.ssh/id_ed25519",
-      "remoteRoots": ["/srv/ftp", "/srv"]
+      "knownHosts": "~/.ssh/known_hosts",
+      "remoteRoots": ["/srv/staging", "/var/www/staging"],
+      "remoteDirDefault": "/srv/staging/uploads"
     }
   }
 }
 ```
 
-## Ús
-```bash
-npm install
-npm start
-```
-1. Tria perfil.
-2. (Opcional) Llista destins amb “Llistar”, tria base/subcarpeta o escriu-ne una de nova.
-3. Test de connexió o clica “Upload file(s)” / “Upload folder”.
-4. Per cancel·lar, usa “Cancel·la upload” i marca “Esborra remot” si vols borrar el destí parcial.
+## Config fields
+
+- `defaultProfile`: profile loaded on startup
+- `remoteRoots`: global fallback base directories
+- `remoteDirDefault`: optional default remote path
+- `profiles`: named SSH profiles
+
+Per profile:
+
+- `host`: server hostname or IP
+- `port`: SSH port
+- `user`: SSH user
+- `identityFile`: local private key path
+- `knownHosts`: optional known hosts path
+- `remoteRoots`: allowed base directories for that profile
+- `remoteDirDefault`: optional default destination path
+
+## Usage
+
+1. Select a profile.
+2. Review or edit the destination path.
+3. Optionally list remote directories under one of the configured roots.
+4. Use `Test connection` to verify SSH access.
+5. Upload files or a folder.
+6. Review progress cards and logs.
 
 ## Notes
-- `config.json` està ignorat al repo (`.gitignore`).
-- El llistat de carpetes es limita a les `remoteRoots` del perfil o globals.
 
-## Llicència
+- The repo does not include real server credentials.
+- All server-specific paths should live in local config, not in the codebase.
+- `config.json` is intentionally ignored by Git.
+- The current UI follows the shared brand direction used across related local tools.
+
+## License
+
 MIT
